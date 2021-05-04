@@ -1,0 +1,10 @@
+[ipam]
+username = user
+appcode = code
+server = https://ipamserver
+
+[snmp]
+servers = ["1.1.1.1", "2.2.2.2"]
+username = snmp_user
+password = snmp_pass
+
