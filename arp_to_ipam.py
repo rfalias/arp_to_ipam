@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import urllib3
 import json
 import easysnmp
@@ -25,6 +26,29 @@ class subnetobj:
         self.network = None
         self.netmask = None
         self.name = None
+        self.ips = list()
+
+
+def get_subnet_addresses(subnetobj, username, password, server):
+    username = username
+    appcode = password
+    ipam = PhpIpamClient(
+        url=server,
+        app_id=username,
+        username=username,
+        password=appcode,
+        user_agent='snmpscanner', # custom user-agent header
+        ssl_verify = False
+    )
+    ips = list()
+    addresses = list()
+    try:    
+        addresses = ipam.get(f"/subnets/{subnetobj.subnet_id}/addresses/")
+    except:
+        print("No addresses in subnet")
+    for address in addresses:
+        ips.append(address["ip"])
+    return ips
 
 
 # Create an IP address in a given subnet
@@ -80,6 +104,7 @@ def get_ipam_subnets(username, password, server):
             net.network = subnet["subnet"]
             net.netmask = subnet["mask"]
             net.name = subnet["description"]
+            net.ips = get_subnet_addresses(net,username,password,server)
             all_subnets.append(net)
     return all_subnets
 
@@ -118,7 +143,7 @@ def snmp_arp_scan(username, password, servers):
 
 # Query IPAM server for subnets, compare IP address against known IPAM networks
 # if an address fits within a given network, create a record that it's used
-def populate_ipam_from_arp(config):
+def populate_ipam_from_arp(config, dryrun=False):
     ipam_user = config['ipam']['username']
     ipam_pass = config['ipam']['appcode']
     ipam_server = config['ipam']['server']
@@ -131,16 +156,23 @@ def populate_ipam_from_arp(config):
         ipa = ipaddress.ip_address(ip.ip)
         for subnet in subnets:
             network = ipaddress.ip_network(f"{subnet.network}/{subnet.netmask}")
+            if ip.ip in subnet.ips:
+                print(f"{ip.ip} is in {subnet.network} - {subnet.name} - Skipped")
+                continue
             if ipa in network:
-                cres = create_address(ip.ip, subnet.subnet_id, ipam_user, ipam_pass, ipam_server)
+                cres = "Dry Run"
+                if not dryrun:
+                    cres = create_address(ip.ip, subnet.subnet_id, ipam_user, ipam_pass, ipam_server)
                 print(f"{ip.ip} is in {subnet.network} - {subnet.name} - {cres}")
 
 
 if __name__ == "__main__":
     config = configparser.ConfigParser()
     config.read('/etc/ipam/arp.conf')
-    
-    populate_ipam_from_arp(config)
+    parser = argparse.ArgumentParser(description='arp to ipam')
+    parser.add_argument('-d', '--dry-run', required=False, action='store_true', help="Dry Run")
+    args = parser.parse_args()
+    populate_ipam_from_arp(config, args.dry_run)
 
 
 
