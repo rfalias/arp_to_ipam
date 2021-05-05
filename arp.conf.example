@@ -1,10 +1,18 @@
 [ipam]
 username = user
 appcode = code
-server = https://ipamserver
+server = https://server
+
 
 [snmp]
-servers = ["1.1.1.1", "2.2.2.2"]
-username = snmp_user
-password = snmp_pass
+servers = {
+           "10.0.0.1":"IP-MIB::ipNetToMediaPhysAddress",
+           "10.0.0.2":"IP-MIB::ipNetToMediaPhysAddress",
+           "10.0.0.3":"IP-MIB::ipNetToMediaPhysAddress",
+           "10.11.12.13":"IP-MIB::ipNetToPhysicalPhysAddress",
+           "10.1.2.4":"IP-MIB::ipNetToPhysicalPhysAddress",
+           "10.1.2.3":"IP-MIB::ipNetToPhysicalPhysAddress",
+          }
+username = user
+password = pass
 

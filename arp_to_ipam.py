@@ -10,7 +10,6 @@ import phpipam_client
 import configparser
 urllib3.disable_warnings()
 
-
 # Store information about an address
 class ipobject:
     def __init__(self):
@@ -42,10 +41,10 @@ def get_subnet_addresses(subnetobj, username, password, server):
     )
     ips = list()
     addresses = list()
-    try:    
+    try:
         addresses = ipam.get(f"/subnets/{subnetobj.subnet_id}/addresses/")
     except:
-        print("No addresses in subnet")
+        pass
     for address in addresses:
         ips.append(address["ip"])
     return ips
@@ -66,7 +65,7 @@ def create_address(ip, subnetId, username, password, server):
     )
     # read objecs
     try:
-        ipam.post(f"/addresses/?subnetId={subnetId}&ip={ip}", 
+        ipam.post(f"/addresses/?subnetId={subnetId}&ip={ip}",
                   {'description':'Added via SNMP', 'excludePing':1})
         result = f"Created IP Address {ip} in subnet {subnetId}"
     except phpipam_client.client.PhpIpamException as e:
@@ -94,9 +93,9 @@ def get_ipam_subnets(username, password, server):
         subnets = ""
         try:
             subnets = ipam.get(f"/sections/{id}/subnets")
-        except: 
-            print(f"No data for subnet {id}")
-        
+        except:
+            pass
+
         for subnet in subnets:
             net = subnetobj()
             net.section_id = id
@@ -110,13 +109,14 @@ def get_ipam_subnets(username, password, server):
 
 
 # Run SNMP query against list of routers, return list of ip objects
-def snmp_arp_scan(username, password, servers):
+def snmp_arp_scan(username, password, servers, quiet=False):
     addresses = list()
     for server in servers:
-        print(f"Querying SNMP Target {server}")
+        if not quiet:
+            print(f"Querying SNMP Target {server} with mib {servers[server]}")
         session = Session(
                   hostname=server,
-                  security_level='auth_with_privacy',  
+                  security_level='auth_with_privacy',
                   version=3,
                   security_username=username,
                   auth_protocol='SHA',
@@ -125,14 +125,23 @@ def snmp_arp_scan(username, password, servers):
                   privacy_protocol='AES',
                   use_sprint_value=True
         )
-        net_phys_addr = session.walk('IP-MIB::ipNetToMediaPhysAddress')
+        net_phys_addr = ""
+        try:
+            net_phys_addr = session.walk(servers[server])
+        except:
+            if not quiet:
+                print("Unable to contact SNMP server, check connection details")
+            continue
         for item in net_phys_addr:
             oid=item.oid,
             oid_index=item.oid_index,
             snmp_type=item.snmp_type,
             value=item.value
             ind_spl = oid_index[0].split('.')
-            ip = ".".join(ind_spl[1:len(ind_spl)])
+            if "ipNetToPhysicalPhysAddress" in oid:
+                ip = ".".join(ind_spl[2:len(ind_spl)])
+            else:
+                ip = ".".join(ind_spl[1:len(ind_spl)])
             obj = ipobject()
             obj.mac = value
             obj.ip = ip
@@ -143,27 +152,29 @@ def snmp_arp_scan(username, password, servers):
 
 # Query IPAM server for subnets, compare IP address against known IPAM networks
 # if an address fits within a given network, create a record that it's used
-def populate_ipam_from_arp(config, dryrun=False):
+def populate_ipam_from_arp(config, dryrun=False, quiet=False, showskipped=False):
     ipam_user = config['ipam']['username']
     ipam_pass = config['ipam']['appcode']
     ipam_server = config['ipam']['server']
     snmp_user = config['snmp']['username']
     snmp_pass = config['snmp']['password']
     snmp_servers = json.loads(config['snmp']['servers'])
-    ips = snmp_arp_scan(snmp_user, snmp_pass, snmp_servers)
+    ips = snmp_arp_scan(snmp_user, snmp_pass, snmp_servers, quiet)
     subnets = get_ipam_subnets(ipam_user, ipam_pass, ipam_server)
     for ip in ips:
         ipa = ipaddress.ip_address(ip.ip)
         for subnet in subnets:
             network = ipaddress.ip_network(f"{subnet.network}/{subnet.netmask}")
             if ip.ip in subnet.ips:
-                print(f"{ip.ip} is in {subnet.network} - {subnet.name} - Skipped")
+                if not quiet and showskipped:
+                    print(f"{ip.ip} is in {subnet.network} - {subnet.name} - Skipped")
                 continue
             if ipa in network:
                 cres = "Dry Run"
                 if not dryrun:
                     cres = create_address(ip.ip, subnet.subnet_id, ipam_user, ipam_pass, ipam_server)
-                print(f"{ip.ip} is in {subnet.network} - {subnet.name} - {cres}")
+                if not quiet:
+                    print(f"{ip.ip} is in {subnet.network} - {subnet.name} - {cres}")
 
 
 if __name__ == "__main__":
@@ -171,8 +182,11 @@ if __name__ == "__main__":
     config.read('/etc/ipam/arp.conf')
     parser = argparse.ArgumentParser(description='arp to ipam')
     parser.add_argument('-d', '--dry-run', required=False, action='store_true', help="Dry Run")
+    parser.add_argument('-q', '--quiet', required=False, action='store_true', help="Quiet")
+    parser.add_argument('--show-skipped', required=False, action='store_true', help="Show IP's that were skipped due to existing already")
     args = parser.parse_args()
-    populate_ipam_from_arp(config, args.dry_run)
+    populate_ipam_from_arp(config, args.dry_run, args.quiet, args.show_skipped)
+
 
 
 
